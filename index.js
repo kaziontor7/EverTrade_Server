@@ -12,11 +12,11 @@ app.use(express.json());
 
 // Health Check Endpoint
 app.get('/', (req, res) => {
-    res.json({
-        status: 'ok',
-        message: 'EverTrade API is active',
-        timestamp: new Date()
-    });
+  res.json({
+    status: 'ok',
+    message: 'EverTrade API is active',
+    timestamp: new Date()
+  });
 });
 const uri = process.env.MONGODB_URI;
 
@@ -35,14 +35,28 @@ async function run() {
     await client.connect();
     const database = client.db(process.env.MONGODB_DB);
     const usersCollection = database.collection('user');
+    const productsCollection = database.collection('products');
 
 
-    app.get('/users', async (req,res)=>{
-        const users= await usersCollection.find({}).toArray()
-        res.send(users)
-    } )
+    app.get('/users', async (req, res) => {
+      const users = await usersCollection.find({}).toArray()
+      res.send(users)
+    })
 
-    
+
+    app.post('/api/products', async (req, res) => {
+      const product = req.body;
+      const newProduct = {
+        ...product,
+        createdAt: new Date(),
+        isSold: false,
+        reported: false
+      }
+      const result = await productsCollection.insertOne(newProduct);
+      res.send(result);
+    })
+
+
 
     // Send a ping to confirm a successful connection
     await database.command({ ping: 1 });
@@ -56,5 +70,5 @@ run().catch(console.dir);
 
 
 app.listen(PORT, () => {
-    console.log(`EverTrade Server running on port ${PORT}`);
+  console.log(`EverTrade Server running on port ${PORT}`);
 });

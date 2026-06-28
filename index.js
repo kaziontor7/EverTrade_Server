@@ -1,7 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const dotenv = require('dotenv');
-const { MongoClient, ServerApiVersion } = require('mongodb');
+const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 dotenv.config();
 
 const app = express();
@@ -36,12 +36,38 @@ async function run() {
     const database = client.db(process.env.MONGODB_DB);
     const usersCollection = database.collection('user');
     const productsCollection = database.collection('products');
+    const wishlistCollection = database.collection('wishlist');
 
 
     app.get('/users', async (req, res) => {
       const users = await usersCollection.find({}).toArray()
       res.send(users)
     })
+
+    app.get('/api/products', async (req, res) => {
+      const query = {}
+      if (req.query.sellerId) {
+        query.sellerId = req.query.sellerId;
+      }
+
+      const cursor = productsCollection.find(query)
+      const products = await cursor.toArray()
+      res.send(products)
+    })
+    app.get('/api/products/:id', async (req, res) => {
+      try {
+        const id = req.params.id;
+        const query = { _id: new ObjectId(id) };
+        const product = await productsCollection.findOne(query);
+        if (product) {
+          res.send(product);
+        } else {
+          res.status(404).send({ message: "Product not found" });
+        }
+      } catch (err) {
+        res.status(500).send({ message: err.message });
+      }
+    });
 
 
     app.post('/api/products', async (req, res) => {
@@ -55,6 +81,13 @@ async function run() {
       const result = await productsCollection.insertOne(newProduct);
       res.send(result);
     })
+
+    app.post('/api/wishlist', async (req, res) => {
+      const wishlist = req.body;
+      const result = await wishlistCollection.insertOne(wishlist);
+      res.send(result)
+    })
+
 
 
 

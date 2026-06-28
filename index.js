@@ -81,12 +81,28 @@ async function run() {
       const result = await productsCollection.insertOne(newProduct);
       res.send(result);
     })
-
+    //wishlist
     app.post('/api/wishlist', async (req, res) => {
       const wishlist = req.body;
       const result = await wishlistCollection.insertOne(wishlist);
       res.send(result)
     })
+
+    app.get('/api/wishlist/:userId', async (req, res) => {
+      const userId = req.params.userId;
+      const query = { userId: userId };
+      const cursor = wishlistCollection.find(query);
+      const wishlist = await cursor.toArray();
+      res.send(wishlist);
+    })
+
+    app.delete('/api/wishlist/:id', async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const result = await wishlistCollection.deleteOne(query);
+      res.send(result);
+    })
+
 
 
 

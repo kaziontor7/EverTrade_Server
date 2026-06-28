@@ -37,7 +37,8 @@ async function run() {
     const usersCollection = database.collection('user');
     const productsCollection = database.collection('products');
     const wishlistCollection = database.collection('wishlist');
-
+    const ordersCollection = database.collection('orders');
+    const paymentsCollection = database.collection('payments');
 
     app.get('/users', async (req, res) => {
       const users = await usersCollection.find({}).toArray()
@@ -103,7 +104,32 @@ async function run() {
       res.send(result);
     })
 
+    // Create an Order
+    app.post('/api/orders', async (req, res) => {
+      try {
+        const orderData = req.body;
+        orderData.createdAt = new Date();
+        orderData.status = 'Pending';
+        const result = await ordersCollection.insertOne(orderData);
+        res.send(result);
+      } catch (error) {
+        console.error("Error creating order:", error);
+        res.status(500).send({ error: "Failed to create order" });
+      }
+    });
 
+    // Create a Payment record
+    app.post('/api/payments', async (req, res) => {
+      try {
+        const paymentData = req.body;
+        paymentData.createdAt = new Date();
+        const result = await paymentsCollection.insertOne(paymentData);
+        res.send(result);
+      } catch (error) {
+        console.error("Error creating payment:", error);
+        res.status(500).send({ error: "Failed to record payment" });
+      }
+    });
 
 
 

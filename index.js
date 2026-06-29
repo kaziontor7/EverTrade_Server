@@ -132,6 +132,69 @@ async function run() {
       }
     });
 
+    // Handle Successful Checkout Sync
+    app.post('/api/checkout/success', async (req, res) => {
+      try {
+        const { payment_intent, userId, customerEmail, amount, status } = req.body;
+        
+        if (status !== 'complete' && status !== 'paid') {
+          return res.status(400).send({ error: "Payment not complete" });
+        }
+
+        // 1. Prevent duplicate processing
+        const existingPayment = await paymentsCollection.findOne({ transactionId: payment_intent });
+        if (existingPayment) {
+          return res.send({ success: true, message: "Already processed" });
+        }
+
+        // 2. Fetch the user's cart
+        const cartItems = await cartCollection.find({ userId }).toArray();
+        if (!cartItems || cartItems.length === 0) {
+          return res.send({ success: true, message: "Cart was already empty" });
+        }
+
+        // 3. Create Orders (mapping to requested schema)
+        const orders = cartItems.map(item => ({
+          buyerInfo: {
+            userId: userId,
+            email: customerEmail,
+          },
+          sellerInfo: {
+            userId: item.sellerId,
+            name: item.sellerName,
+            email: 'seller@evertrade.com' // Fallback if missing
+          },
+          productId: item.productId || item._id,
+          title: item.title,
+          price: item.price,
+          quantity: item.cartQuantity,
+          paymentStatus: "paid",
+          orderStatus: "processing",
+          createdAt: new Date(),
+          transactionId: payment_intent
+        }));
+
+        await ordersCollection.insertMany(orders);
+
+        // 4. Create Payment Record
+        await paymentsCollection.insertOne({
+          userId,
+          transactionId: payment_intent,
+          amount: amount / 100, // Convert subunits back to standard unit
+          paymentStatus: "success",
+          createdAt: new Date()
+        });
+
+        // 5. Clear Cart
+        await cartCollection.deleteMany({ userId });
+
+        res.send({ success: true, message: "Order processed successfully" });
+      } catch (error) {
+        console.error("Checkout Success Error:", error);
+        res.status(500).send({ error: "Failed to process checkout success" });
+      }
+    });
+
     // --- CART ENDPOINTS ---
     app.get('/api/cart', async (req, res) => {
       const userId = req.query.userId;

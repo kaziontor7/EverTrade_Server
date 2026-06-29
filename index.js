@@ -42,6 +42,61 @@ async function run() {
     const cartCollection = database.collection('cart');
     const reviewsCollection = database.collection('reviews');
 
+    // Admin Endpoints
+    app.get('/api/admin/stats', async (req, res) => {
+      try {
+        const totalUsers = await usersCollection.countDocuments();
+        const pendingSellers = await usersCollection.countDocuments({ role: 'seller', isVerified: false });
+        const totalProducts = await productsCollection.countDocuments();
+        const totalOrders = await ordersCollection.countDocuments();
+        
+        // Calculate Revenue (5% of delivered orders)
+        const deliveredOrders = await ordersCollection.find({ orderStatus: { $regex: /^delivered$/i } }).toArray();
+        const totalRevenue = deliveredOrders.reduce((sum, order) => sum + ((order.price || 0) * 0.05), 0);
+
+        const recentOrders = await ordersCollection.find({}).sort({ createdAt: -1 }).limit(5).toArray();
+        const recentProducts = await productsCollection.find({}).sort({ createdAt: -1 }).limit(5).toArray();
+        
+        res.send({
+          totalUsers,
+          pendingSellers,
+          totalProducts,
+          totalOrders,
+          totalRevenue,
+          recentOrders,
+          recentProducts
+        });
+      } catch (error) {
+        console.error("Admin stats error:", error);
+        res.status(500).send({ error: "Failed to fetch admin stats" });
+      }
+    });
+
+    // Admin - Verify Seller
+    app.patch('/api/admin/users/:id/verify', async (req, res) => {
+      try {
+        const userId = req.params.id;
+        const { isVerified } = req.body;
+        
+        // Update User Collection
+        await usersCollection.updateOne(
+          { _id: new ObjectId(userId) },
+          { $set: { isVerified: isVerified } }
+        );
+        
+        // Sync verification status to all their products
+        await productsCollection.updateMany(
+          { sellerId: userId },
+          { $set: { sellerVerified: isVerified } }
+        );
+        
+        res.send({ success: true, isVerified });
+      } catch (error) {
+        console.error("Admin verify seller error:", error);
+        res.status(500).send({ error: "Failed to verify seller" });
+      }
+    });
+
     app.get('/users', async (req, res) => {
       const users = await usersCollection.find({}).toArray()
       res.send(users)
@@ -235,6 +290,67 @@ async function run() {
       } catch (error) {
         console.error("Checkout Success Error:", error);
         res.status(500).send({ error: "Failed to process checkout success" });
+      }
+    });
+
+    // Admin - Get All Orders
+    app.get('/api/admin/orders', async (req, res) => {
+      try {
+        const orders = await ordersCollection.find({}).sort({ createdAt: -1 }).toArray();
+        res.send(orders);
+      } catch (error) {
+        res.status(500).send({ error: "Failed to fetch all orders" });
+      }
+    });
+
+    // Admin - Get Analytics Data
+    app.get('/api/admin/analytics', async (req, res) => {
+      try {
+        // 1. User Growth (Users created grouped by month)
+        const userGrowth = await usersCollection.aggregate([
+          {
+            $group: {
+              _id: { $dateToString: { format: "%Y-%m", date: { $toDate: "$createdAt" } } },
+              users: { $sum: 1 }
+            }
+          },
+          { $sort: { "_id": 1 } },
+          { $limit: 12 }
+        ]).toArray();
+
+        // 2. Category Performance (Products grouped by category)
+        const categoryStats = await productsCollection.aggregate([
+          {
+            $group: {
+              _id: "$category",
+              count: { $sum: 1 }
+            }
+          },
+          { $sort: { count: -1 } },
+          { $limit: 5 }
+        ]).toArray();
+
+        // 3. Monthly Orders (Orders & Revenue grouped by month)
+        const monthlyOrders = await ordersCollection.aggregate([
+          {
+            $group: {
+              _id: { $dateToString: { format: "%Y-%m", date: { $toDate: "$createdAt" } } },
+              orders: { $sum: 1 },
+              revenue: { $sum: { $cond: [ { $eq: [{ $toLower: "$orderStatus" }, "delivered"] }, { $multiply: [{ $toDouble: "$price" }, 0.05] }, 0 ] } }
+            }
+          },
+          { $sort: { "_id": 1 } },
+          { $limit: 12 }
+        ]).toArray();
+
+        res.send({
+          userGrowth: userGrowth.map(item => ({ month: item._id || 'Unknown', users: item.users })),
+          categoryStats: categoryStats.map(item => ({ name: item._id || 'Unknown', value: item.count })),
+          monthlyOrders: monthlyOrders.map(item => ({ month: item._id || 'Unknown', orders: item.orders, revenue: item.revenue }))
+        });
+      } catch (error) {
+        console.error("Admin analytics error:", error);
+        res.status(500).send({ error: "Failed to fetch analytics" });
       }
     });
 

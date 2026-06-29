@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const dotenv = require('dotenv');
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
+const { createRemoteJWKSet, jwtVerify } = require('jose-cjs');
 dotenv.config();
 
 const app = express();
@@ -29,6 +30,41 @@ const client = new MongoClient(uri, {
   }
 });
 
+const JWKS = createRemoteJWKSet(new URL(`${process.env.CLIENT_URL}/api/auth/jwks`))
+
+const verifyToken = async (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
+  const token = authHeader.split(' ')[1];
+  if (!token) {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
+  try {
+    const { payload } = await jwtVerify(token, JWKS);
+    req.user = payload;
+    next();
+  } catch (error) {
+    res.status(401).json({ message: "Unauthorized" });
+  }
+}
+
+const sellerVerify = (req, res, next) => {
+  if (req.user.role !== 'seller') {
+    return res.status(403).json({ message: "Forbidden" });
+  }
+  next();
+}
+
+const adminVerify = (req, res, next) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ message: "Forbidden" });
+  }
+  next();
+}
+
+
 // async function run() {
 //   try {
 //     // Connect the client to the server	(optional starting in v4.7)
@@ -47,7 +83,7 @@ const cartCollection = database.collection('cart');
 const reviewsCollection = database.collection('reviews');
 
 // Admin Endpoints
-app.get('/api/admin/stats', async (req, res) => {
+app.get('/api/admin/stats', verifyToken, adminVerify, async (req, res) => {
   try {
     const totalUsers = await usersCollection.countDocuments();
     const pendingSellers = await usersCollection.countDocuments({ role: 'seller', isVerified: false });
@@ -77,7 +113,7 @@ app.get('/api/admin/stats', async (req, res) => {
 });
 
 // Admin - Verify Seller
-app.patch('/api/admin/users/:id/verify', async (req, res) => {
+app.patch('/api/admin/users/:id/verify', verifyToken, adminVerify, async (req, res) => {
   try {
     const userId = req.params.id;
     const { isVerified } = req.body;
@@ -106,16 +142,23 @@ app.get('/users', async (req, res) => {
   res.send(users)
 })
 
-app.get('/api/products', async (req, res) => {
-  const query = {}
-  if (req.query.sellerId) {
-    query.sellerId = req.query.sellerId;
-  }
+    app.get('/api/products', async (req, res, next) => {
+      if (req.query.sellerId) {
+        return verifyToken(req, res, () => {
+          return sellerVerify(req, res, next);
+        });
+      }
+      next();
+    }, async (req, res) => {
+      const query = {}
+      if (req.query.sellerId) {
+        query.sellerId = req.query.sellerId;
+      }
 
-  const cursor = productsCollection.find(query)
-  const products = await cursor.toArray()
-  res.send(products)
-})
+      const cursor = productsCollection.find(query)
+      const products = await cursor.toArray()
+      res.send(products)
+    })
 app.get('/api/products/:id', async (req, res) => {
   try {
     const id = req.params.id;
@@ -132,7 +175,7 @@ app.get('/api/products/:id', async (req, res) => {
 });
 
 
-app.post('/api/products', async (req, res) => {
+app.post('/api/products', verifyToken, sellerVerify, async (req, res) => {
   const product = req.body;
   const newProduct = {
     ...product,
@@ -144,39 +187,39 @@ app.post('/api/products', async (req, res) => {
   res.send(result);
 })
 
-app.delete('/api/products/:id', async (req, res) => {
-  try {
-    const id = req.params.id;
-    const query = { _id: new ObjectId(id) };
-    const result = await productsCollection.deleteOne(query);
-    res.send(result);
-  } catch (err) {
-    res.status(500).send({ message: err.message });
-  }
-});
+    app.delete('/api/products/:id', verifyToken, sellerVerify, async (req, res) => {
+      try {
+        const id = req.params.id;
+        const query = { _id: new ObjectId(id) };
+        const result = await productsCollection.deleteOne(query);
+        res.send(result);
+      } catch (err) {
+        res.status(500).send({ message: err.message });
+      }
+    });
 
-app.patch('/api/products/:id', async (req, res) => {
-  try {
-    const id = req.params.id;
-    const updateData = req.body;
-    const query = { _id: new ObjectId(id) };
-    const updateDoc = {
-      $set: updateData
-    };
-    const result = await productsCollection.updateOne(query, updateDoc);
-    res.send(result);
-  } catch (err) {
-    res.status(500).send({ message: err.message });
-  }
-});
+    app.patch('/api/products/:id', verifyToken, sellerVerify, async (req, res) => {
+      try {
+        const id = req.params.id;
+        const updateData = req.body;
+        const query = { _id: new ObjectId(id) };
+        const updateDoc = {
+          $set: updateData
+        };
+        const result = await productsCollection.updateOne(query, updateDoc);
+        res.send(result);
+      } catch (err) {
+        res.status(500).send({ message: err.message });
+      }
+    });
 //wishlist
-app.post('/api/wishlist', async (req, res) => {
+app.post('/api/wishlist', verifyToken, async (req, res) => {
   const wishlist = req.body;
   const result = await wishlistCollection.insertOne(wishlist);
   res.send(result)
 })
 
-app.get('/api/wishlist/:userId', async (req, res) => {
+app.get('/api/wishlist/:userId', verifyToken, async (req, res) => {
   const userId = req.params.userId;
   const query = { userId: userId };
   const cursor = wishlistCollection.find(query);
@@ -184,7 +227,7 @@ app.get('/api/wishlist/:userId', async (req, res) => {
   res.send(wishlist);
 })
 
-app.delete('/api/wishlist/:id', async (req, res) => {
+app.delete('/api/wishlist/:id', verifyToken, async (req, res) => {
   const id = req.params.id;
   const query = { _id: new ObjectId(id) };
   const result = await wishlistCollection.deleteOne(query);
@@ -192,7 +235,7 @@ app.delete('/api/wishlist/:id', async (req, res) => {
 })
 
 // Create an Order
-app.post('/api/orders', async (req, res) => {
+app.post('/api/orders', verifyToken, async (req, res) => {
   try {
     const orderData = req.body;
     orderData.createdAt = new Date();
@@ -206,7 +249,7 @@ app.post('/api/orders', async (req, res) => {
 });
 
 // Update Order Status
-app.patch('/api/orders/:id/status', async (req, res) => {
+app.patch('/api/orders/:id/status', verifyToken, async (req, res) => {
   try {
     const id = req.params.id;
     const { status } = req.body;
@@ -221,7 +264,7 @@ app.patch('/api/orders/:id/status', async (req, res) => {
 });
 
 // Create a Payment record
-app.post('/api/payments', async (req, res) => {
+app.post('/api/payments', verifyToken, async (req, res) => {
   try {
     const paymentData = req.body;
     paymentData.createdAt = new Date();
@@ -234,7 +277,7 @@ app.post('/api/payments', async (req, res) => {
 });
 
 // Handle Successful Checkout Sync
-app.post('/api/checkout/success', async (req, res) => {
+app.post('/api/checkout/success', verifyToken, async (req, res) => {
   try {
     const { payment_intent, userId, customerEmail, amount, status } = req.body;
 
@@ -298,7 +341,7 @@ app.post('/api/checkout/success', async (req, res) => {
 });
 
 // Admin - Get All Orders
-app.get('/api/admin/orders', async (req, res) => {
+app.get('/api/admin/orders', verifyToken, adminVerify, async (req, res) => {
   try {
     const orders = await ordersCollection.find({}).sort({ createdAt: -1 }).toArray();
     res.send(orders);
@@ -308,7 +351,7 @@ app.get('/api/admin/orders', async (req, res) => {
 });
 
 // Admin - Get Analytics Data
-app.get('/api/admin/analytics', async (req, res) => {
+app.get('/api/admin/analytics', verifyToken, adminVerify, async (req, res) => {
   try {
     // 1. User Growth (Users created grouped by month)
     const userGrowth = await usersCollection.aggregate([
@@ -359,7 +402,7 @@ app.get('/api/admin/analytics', async (req, res) => {
 });
 
 // Get Buyer Orders
-app.get('/api/orders/buyer/:userId', async (req, res) => {
+app.get('/api/orders/buyer/:userId', verifyToken, async (req, res) => {
   try {
     const userId = req.params.userId;
     const orders = await ordersCollection.find({ "buyerInfo.userId": userId }).sort({ createdAt: -1 }).toArray();
@@ -370,7 +413,7 @@ app.get('/api/orders/buyer/:userId', async (req, res) => {
 });
 
 // Get Orders by Transaction ID
-app.get('/api/orders/transaction/:transactionId', async (req, res) => {
+app.get('/api/orders/transaction/:transactionId', verifyToken, async (req, res) => {
   try {
     const transactionId = req.params.transactionId;
     const orders = await ordersCollection.find({ transactionId: transactionId }).toArray();
@@ -381,7 +424,7 @@ app.get('/api/orders/transaction/:transactionId', async (req, res) => {
 });
 
 // Get Seller Orders
-app.get('/api/orders/seller/:userId', async (req, res) => {
+app.get('/api/orders/seller/:userId', verifyToken, sellerVerify, async (req, res) => {
   try {
     const userId = req.params.userId;
     const orders = await ordersCollection.find({ "sellerInfo.userId": userId }).sort({ createdAt: -1 }).toArray();
@@ -391,20 +434,7 @@ app.get('/api/orders/seller/:userId', async (req, res) => {
   }
 });
 
-app.patch('/api/orders/:id/status', async (req, res) => {
-  try {
-    const id = req.params.id;
-    const { status } = req.body;
-    const query = { _id: new ObjectId(id) };
-    const updateDoc = {
-      $set: { orderStatus: status }
-    };
-    const result = await ordersCollection.updateOne(query, updateDoc);
-    res.send(result);
-  } catch (err) {
-    res.status(500).send({ message: err.message });
-  }
-});
+
 
 // Reviews Endpoints
 app.get('/api/reviews/:productId', async (req, res) => {
@@ -417,7 +447,7 @@ app.get('/api/reviews/:productId', async (req, res) => {
   }
 });
 
-app.get('/api/reviews/eligibility/:productId/:userId', async (req, res) => {
+app.get('/api/reviews/eligibility/:productId/:userId', verifyToken, async (req, res) => {
   try {
     const { productId, userId } = req.params;
     const order = await ordersCollection.findOne({
@@ -435,7 +465,7 @@ app.get('/api/reviews/eligibility/:productId/:userId', async (req, res) => {
   }
 });
 
-app.post('/api/reviews', async (req, res) => {
+app.post('/api/reviews', verifyToken, async (req, res) => {
   try {
     const reviewData = req.body;
     reviewData.createdAt = new Date();
@@ -447,7 +477,7 @@ app.post('/api/reviews', async (req, res) => {
 });
 
 // Get Buyer Payments
-app.get('/api/payments/:userId', async (req, res) => {
+app.get('/api/payments/:userId', verifyToken, async (req, res) => {
   try {
     const userId = req.params.userId;
     const payments = await paymentsCollection.find({ userId: userId }).sort({ createdAt: -1 }).toArray();
@@ -458,14 +488,14 @@ app.get('/api/payments/:userId', async (req, res) => {
 });
 
 // --- CART ENDPOINTS ---
-app.get('/api/cart', async (req, res) => {
+app.get('/api/cart', verifyToken, async (req, res) => {
   const userId = req.query.userId;
   if (!userId) return res.status(400).send({ error: "Missing userId" });
   const cartItems = await cartCollection.find({ userId }).toArray();
   res.send(cartItems);
 });
 
-app.post('/api/cart', async (req, res) => {
+app.post('/api/cart', verifyToken, async (req, res) => {
   const { userId, ...productData } = req.body;
   if (!userId || !productData._id) return res.status(400).send({ error: "Missing data" });
 
@@ -488,7 +518,7 @@ app.post('/api/cart', async (req, res) => {
   }
 });
 
-app.delete('/api/cart/:productId', async (req, res) => {
+app.delete('/api/cart/:productId', verifyToken, async (req, res) => {
   const userId = req.query.userId;
   const productId = req.params.productId;
   if (!userId) return res.status(400).send({ error: "Missing userId" });
@@ -497,7 +527,7 @@ app.delete('/api/cart/:productId', async (req, res) => {
   res.send(result);
 });
 
-app.delete('/api/cart/clear/:userId', async (req, res) => {
+app.delete('/api/cart/clear/:userId', verifyToken, async (req, res) => {
   const userId = req.params.userId;
   const result = await cartCollection.deleteMany({ userId });
   res.send(result);

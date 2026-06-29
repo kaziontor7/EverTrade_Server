@@ -110,12 +110,27 @@ async function run() {
       try {
         const orderData = req.body;
         orderData.createdAt = new Date();
-        orderData.status = 'Pending';
+        orderData.orderStatus = 'processing';
         const result = await ordersCollection.insertOne(orderData);
         res.send(result);
       } catch (error) {
         console.error("Error creating order:", error);
         res.status(500).send({ error: "Failed to create order" });
+      }
+    });
+
+    // Update Order Status
+    app.patch('/api/orders/:id/status', async (req, res) => {
+      try {
+        const id = req.params.id;
+        const { status } = req.body;
+        const result = await ordersCollection.updateOne(
+          { _id: new ObjectId(id) },
+          { $set: { orderStatus: status } }
+        );
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ error: "Failed to update order status" });
       }
     });
 
@@ -171,7 +186,8 @@ async function run() {
           paymentStatus: "paid",
           orderStatus: "processing",
           createdAt: new Date(),
-          transactionId: payment_intent
+          transactionId: payment_intent,
+          image: item.images && item.images.length > 0 ? item.images[0] : (item.image || null)
         }));
 
         await ordersCollection.insertMany(orders);
@@ -192,6 +208,50 @@ async function run() {
       } catch (error) {
         console.error("Checkout Success Error:", error);
         res.status(500).send({ error: "Failed to process checkout success" });
+      }
+    });
+
+    // Get Buyer Orders
+    app.get('/api/orders/buyer/:userId', async (req, res) => {
+      try {
+        const userId = req.params.userId;
+        const orders = await ordersCollection.find({ "buyerInfo.userId": userId }).sort({ createdAt: -1 }).toArray();
+        res.send(orders);
+      } catch (error) {
+        res.status(500).send({ error: "Failed to fetch buyer orders" });
+      }
+    });
+
+    // Get Orders by Transaction ID
+    app.get('/api/orders/transaction/:transactionId', async (req, res) => {
+      try {
+        const transactionId = req.params.transactionId;
+        const orders = await ordersCollection.find({ transactionId: transactionId }).toArray();
+        res.send(orders);
+      } catch (error) {
+        res.status(500).send({ error: "Failed to fetch orders for transaction" });
+      }
+    });
+
+    // Get Seller Orders
+    app.get('/api/orders/seller/:userId', async (req, res) => {
+      try {
+        const userId = req.params.userId;
+        const orders = await ordersCollection.find({ "sellerInfo.userId": userId }).sort({ createdAt: -1 }).toArray();
+        res.send(orders);
+      } catch (error) {
+        res.status(500).send({ error: "Failed to fetch seller orders" });
+      }
+    });
+
+    // Get Buyer Payments
+    app.get('/api/payments/:userId', async (req, res) => {
+      try {
+        const userId = req.params.userId;
+        const payments = await paymentsCollection.find({ userId: userId }).sort({ createdAt: -1 }).toArray();
+        res.send(payments);
+      } catch (error) {
+        res.status(500).send({ error: "Failed to fetch payments" });
       }
     });
 

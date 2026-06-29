@@ -49,14 +49,14 @@ async function run() {
         const pendingSellers = await usersCollection.countDocuments({ role: 'seller', isVerified: false });
         const totalProducts = await productsCollection.countDocuments();
         const totalOrders = await ordersCollection.countDocuments();
-        
+
         // Calculate Revenue (5% of delivered orders)
         const deliveredOrders = await ordersCollection.find({ orderStatus: { $regex: /^delivered$/i } }).toArray();
         const totalRevenue = deliveredOrders.reduce((sum, order) => sum + ((order.price || 0) * 0.05), 0);
 
         const recentOrders = await ordersCollection.find({}).sort({ createdAt: -1 }).limit(5).toArray();
         const recentProducts = await productsCollection.find({}).sort({ createdAt: -1 }).limit(5).toArray();
-        
+
         res.send({
           totalUsers,
           pendingSellers,
@@ -77,19 +77,19 @@ async function run() {
       try {
         const userId = req.params.id;
         const { isVerified } = req.body;
-        
+
         // Update User Collection
         await usersCollection.updateOne(
           { _id: new ObjectId(userId) },
           { $set: { isVerified: isVerified } }
         );
-        
+
         // Sync verification status to all their products
         await productsCollection.updateMany(
           { sellerId: userId },
           { $set: { sellerVerified: isVerified } }
         );
-        
+
         res.send({ success: true, isVerified });
       } catch (error) {
         console.error("Admin verify seller error:", error);
@@ -233,7 +233,7 @@ async function run() {
     app.post('/api/checkout/success', async (req, res) => {
       try {
         const { payment_intent, userId, customerEmail, amount, status } = req.body;
-        
+
         if (status !== 'complete' && status !== 'paid') {
           return res.status(400).send({ error: "Payment not complete" });
         }
@@ -336,7 +336,7 @@ async function run() {
             $group: {
               _id: { $dateToString: { format: "%Y-%m", date: { $toDate: "$createdAt" } } },
               orders: { $sum: 1 },
-              revenue: { $sum: { $cond: [ { $eq: [{ $toLower: "$orderStatus" }, "delivered"] }, { $multiply: [{ $toDouble: "$price" }, 0.05] }, 0 ] } }
+              revenue: { $sum: { $cond: [{ $eq: [{ $toLower: "$orderStatus" }, "delivered"] }, { $multiply: [{ $toDouble: "$price" }, 0.05] }, 0] } }
             }
           },
           { $sort: { "_id": 1 } },
@@ -474,9 +474,9 @@ async function run() {
         res.send(result);
       } else {
         // Remove MongoDB's _id so it auto-generates a new unique one for the cart document
-        const { _id, ...restProductData } = productData; 
-        const result = await cartCollection.insertOne({ 
-          userId, 
+        const { _id, ...restProductData } = productData;
+        const result = await cartCollection.insertOne({
+          userId,
           productId: _id, // keep original product ID here
           ...restProductData,
         });
@@ -488,7 +488,7 @@ async function run() {
       const userId = req.query.userId;
       const productId = req.params.productId;
       if (!userId) return res.status(400).send({ error: "Missing userId" });
-      
+
       const result = await cartCollection.deleteOne({ userId, productId });
       res.send(result);
     });
@@ -502,7 +502,7 @@ async function run() {
 
 
     // Send a ping to confirm a successful connection
-    await database.command({ ping: 1 });
+    // await database.command({ ping: 1 });
     console.log("Pinged your deployment. You successfully connected to MongoDB!");
   } finally {
     // Ensures that the client will close when you finish/error

@@ -40,6 +40,7 @@ async function run() {
     const ordersCollection = database.collection('orders');
     const paymentsCollection = database.collection('payments');
     const cartCollection = database.collection('cart');
+    const reviewsCollection = database.collection('reviews');
 
     app.get('/users', async (req, res) => {
       const users = await usersCollection.find({}).toArray()
@@ -83,6 +84,32 @@ async function run() {
       const result = await productsCollection.insertOne(newProduct);
       res.send(result);
     })
+
+    app.delete('/api/products/:id', async (req, res) => {
+      try {
+        const id = req.params.id;
+        const query = { _id: new ObjectId(id) };
+        const result = await productsCollection.deleteOne(query);
+        res.send(result);
+      } catch (err) {
+        res.status(500).send({ message: err.message });
+      }
+    });
+
+    app.patch('/api/products/:id', async (req, res) => {
+      try {
+        const id = req.params.id;
+        const updateData = req.body;
+        const query = { _id: new ObjectId(id) };
+        const updateDoc = {
+          $set: updateData
+        };
+        const result = await productsCollection.updateOne(query, updateDoc);
+        res.send(result);
+      } catch (err) {
+        res.status(500).send({ message: err.message });
+      }
+    });
     //wishlist
     app.post('/api/wishlist', async (req, res) => {
       const wishlist = req.body;
@@ -184,7 +211,7 @@ async function run() {
           price: item.price,
           quantity: item.cartQuantity,
           paymentStatus: "paid",
-          orderStatus: "processing",
+          orderStatus: "Pending",
           createdAt: new Date(),
           transactionId: payment_intent,
           image: item.images && item.images.length > 0 ? item.images[0] : (item.image || null)
@@ -241,6 +268,61 @@ async function run() {
         res.send(orders);
       } catch (error) {
         res.status(500).send({ error: "Failed to fetch seller orders" });
+      }
+    });
+
+    app.patch('/api/orders/:id/status', async (req, res) => {
+      try {
+        const id = req.params.id;
+        const { status } = req.body;
+        const query = { _id: new ObjectId(id) };
+        const updateDoc = {
+          $set: { orderStatus: status }
+        };
+        const result = await ordersCollection.updateOne(query, updateDoc);
+        res.send(result);
+      } catch (err) {
+        res.status(500).send({ message: err.message });
+      }
+    });
+
+    // Reviews Endpoints
+    app.get('/api/reviews/:productId', async (req, res) => {
+      try {
+        const productId = req.params.productId;
+        const reviews = await reviewsCollection.find({ productId }).sort({ createdAt: -1 }).toArray();
+        res.send(reviews);
+      } catch (error) {
+        res.status(500).send({ error: "Failed to fetch reviews" });
+      }
+    });
+
+    app.get('/api/reviews/eligibility/:productId/:userId', async (req, res) => {
+      try {
+        const { productId, userId } = req.params;
+        const order = await ordersCollection.findOne({
+          "buyerInfo.userId": userId,
+          productId: productId,
+          $or: [{ orderStatus: "delivered" }, { orderStatus: "completed" }]
+        });
+        if (order) {
+          res.send({ eligible: true });
+        } else {
+          res.send({ eligible: false });
+        }
+      } catch (error) {
+        res.status(500).send({ error: "Failed to check review eligibility" });
+      }
+    });
+
+    app.post('/api/reviews', async (req, res) => {
+      try {
+        const reviewData = req.body;
+        reviewData.createdAt = new Date();
+        const result = await reviewsCollection.insertOne(reviewData);
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ error: "Failed to submit review" });
       }
     });
 

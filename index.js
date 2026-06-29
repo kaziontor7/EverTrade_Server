@@ -39,6 +39,7 @@ async function run() {
     const wishlistCollection = database.collection('wishlist');
     const ordersCollection = database.collection('orders');
     const paymentsCollection = database.collection('payments');
+    const cartCollection = database.collection('cart');
 
     app.get('/users', async (req, res) => {
       const users = await usersCollection.find({}).toArray()
@@ -129,6 +130,52 @@ async function run() {
         console.error("Error creating payment:", error);
         res.status(500).send({ error: "Failed to record payment" });
       }
+    });
+
+    // --- CART ENDPOINTS ---
+    app.get('/api/cart', async (req, res) => {
+      const userId = req.query.userId;
+      if (!userId) return res.status(400).send({ error: "Missing userId" });
+      const cartItems = await cartCollection.find({ userId }).toArray();
+      res.send(cartItems);
+    });
+
+    app.post('/api/cart', async (req, res) => {
+      const { userId, ...productData } = req.body;
+      if (!userId || !productData._id) return res.status(400).send({ error: "Missing data" });
+
+      const existing = await cartCollection.findOne({ userId, productId: productData._id });
+      if (existing) {
+        const result = await cartCollection.updateOne(
+          { _id: existing._id },
+          { $set: { cartQuantity: productData.cartQuantity } }
+        );
+        res.send(result);
+      } else {
+        // Remove MongoDB's _id so it auto-generates a new unique one for the cart document
+        const { _id, ...restProductData } = productData; 
+        const result = await cartCollection.insertOne({ 
+          userId, 
+          productId: _id, // keep original product ID here
+          ...restProductData,
+        });
+        res.send(result);
+      }
+    });
+
+    app.delete('/api/cart/:productId', async (req, res) => {
+      const userId = req.query.userId;
+      const productId = req.params.productId;
+      if (!userId) return res.status(400).send({ error: "Missing userId" });
+      
+      const result = await cartCollection.deleteOne({ userId, productId });
+      res.send(result);
+    });
+
+    app.delete('/api/cart/clear/:userId', async (req, res) => {
+      const userId = req.params.userId;
+      const result = await cartCollection.deleteMany({ userId });
+      res.send(result);
     });
 
 

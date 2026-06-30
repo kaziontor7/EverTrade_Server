@@ -81,6 +81,7 @@ const ordersCollection = database.collection('orders');
 const paymentsCollection = database.collection('payments');
 const cartCollection = database.collection('cart');
 const reviewsCollection = database.collection('reviews');
+const notificationsCollection = database.collection('notifications');
 
 // Admin Endpoints
 app.get('/api/admin/stats', verifyToken, adminVerify, async (req, res) => {
@@ -177,11 +178,13 @@ app.get('/api/products/:id', async (req, res) => {
 
 app.post('/api/products', verifyToken, sellerVerify, async (req, res) => {
   const product = req.body;
+  const seller = await usersCollection.findOne({ _id: new ObjectId(req.user.id) });
   const newProduct = {
     ...product,
     createdAt: new Date(),
     isSold: false,
-    reported: false
+    reported: false,
+    sellerVerified: seller?.isVerified || false
   }
   const result = await productsCollection.insertOne(newProduct);
   res.send(result);
@@ -435,6 +438,18 @@ app.get('/api/orders/seller/:userId', verifyToken, sellerVerify, async (req, res
 });
 
 
+const updateProductRating = async (productId) => {
+  const reviews = await reviewsCollection.find({ productId }).toArray();
+  const reviewCount = reviews.length;
+  const averageRating = reviewCount > 0 
+    ? reviews.reduce((sum, review) => sum + (review.rating || 0), 0) / reviewCount 
+    : 0;
+  
+  await productsCollection.updateOne(
+    { _id: new ObjectId(productId) },
+    { $set: { averageRating, reviewCount } }
+  );
+};
 
 // Reviews Endpoints
 app.get('/api/reviews/:productId', async (req, res) => {
@@ -453,10 +468,20 @@ app.get('/api/reviews/eligibility/:productId/:userId', verifyToken, async (req, 
     const order = await ordersCollection.findOne({
       "buyerInfo.userId": userId,
       productId: productId,
-      $or: [{ orderStatus: "delivered" }, { orderStatus: "completed" }]
+      orderStatus: { $regex: /^(delivered|completed)$/i }
     });
+
+    const existingReview = await reviewsCollection.findOne({
+      productId: productId,
+      "reviewerInfo.userId": userId
+    });
+
     if (order) {
-      res.send({ eligible: true });
+      res.send({ 
+        eligible: true, 
+        alreadyReviewed: !!existingReview,
+        existingReview: existingReview || null
+      });
     } else {
       res.send({ eligible: false });
     }
@@ -468,11 +493,124 @@ app.get('/api/reviews/eligibility/:productId/:userId', verifyToken, async (req, 
 app.post('/api/reviews', verifyToken, async (req, res) => {
   try {
     const reviewData = req.body;
+    
+    // Check for existing review
+    const existingReview = await reviewsCollection.findOne({
+      productId: reviewData.productId,
+      "reviewerInfo.userId": reviewData.reviewerInfo.userId
+    });
+
+    if (existingReview) {
+      return res.status(400).send({ error: "You have already reviewed this product." });
+    }
+
     reviewData.createdAt = new Date();
     const result = await reviewsCollection.insertOne(reviewData);
+    
+    await updateProductRating(reviewData.productId);
+    
     res.send(result);
   } catch (error) {
     res.status(500).send({ error: "Failed to submit review" });
+  }
+});
+
+app.patch('/api/reviews/:reviewId', verifyToken, async (req, res) => {
+  try {
+    const { reviewId } = req.params;
+    const { rating, comment, image } = req.body;
+    
+    // Verify author
+    const review = await reviewsCollection.findOne({ _id: new ObjectId(reviewId) });
+    if (!review) return res.status(404).send({ error: "Review not found" });
+    if (review.reviewerInfo.userId !== req.user.id) return res.status(403).send({ error: "Forbidden" });
+
+    const result = await reviewsCollection.updateOne(
+      { _id: new ObjectId(reviewId) },
+      { $set: { rating, comment, image, updatedAt: new Date() } }
+    );
+    
+    await updateProductRating(review.productId);
+    res.send(result);
+  } catch (error) {
+    res.status(500).send({ error: "Failed to update review" });
+  }
+});
+
+app.delete('/api/reviews/:reviewId', verifyToken, async (req, res) => {
+  try {
+    const { reviewId } = req.params;
+    const review = await reviewsCollection.findOne({ _id: new ObjectId(reviewId) });
+    if (!review) return res.status(404).send({ error: "Review not found" });
+    if (review.reviewerInfo.userId !== req.user.id && req.user.role !== 'admin') {
+       return res.status(403).send({ error: "Forbidden" });
+    }
+
+    const result = await reviewsCollection.deleteOne({ _id: new ObjectId(reviewId) });
+    await updateProductRating(review.productId);
+    res.send(result);
+  } catch (error) {
+    res.status(500).send({ error: "Failed to delete review" });
+  }
+});
+
+app.patch('/api/reviews/:reviewId/response', verifyToken, async (req, res) => {
+  try {
+    const { reviewId } = req.params;
+    const { response } = req.body;
+    
+    const review = await reviewsCollection.findOne({ _id: new ObjectId(reviewId) });
+    if (!review) return res.status(404).send({ error: "Review not found" });
+    
+    const product = await productsCollection.findOne({ _id: new ObjectId(review.productId) });
+    if (!product || product.sellerId !== req.user.id) {
+       return res.status(403).send({ error: "Forbidden" });
+    }
+
+    const result = await reviewsCollection.updateOne(
+      { _id: new ObjectId(reviewId) },
+      { $set: { sellerResponse: { text: response, createdAt: new Date() } } }
+    );
+    
+    // Create notification for buyer
+    await notificationsCollection.insertOne({
+      userId: review.reviewerInfo.userId,
+      title: "Seller responded to your review",
+      message: `${product.sellerName || "The seller"} replied to your review on ${product.title}.`,
+      type: "review_response",
+      isRead: false,
+      link: `/products/${product._id}`,
+      createdAt: new Date()
+    });
+
+    res.send(result);
+  } catch (error) {
+    res.status(500).send({ error: "Failed to add seller response" });
+  }
+});
+
+// Notifications Endpoints
+app.get('/api/notifications/:userId', verifyToken, async (req, res) => {
+  try {
+    const { userId } = req.params;
+    if (req.user.id !== userId) return res.status(403).send({ error: "Forbidden" });
+    const notifications = await notificationsCollection.find({ userId }).sort({ createdAt: -1 }).toArray();
+    res.send(notifications);
+  } catch (error) {
+    res.status(500).send({ error: "Failed to fetch notifications" });
+  }
+});
+
+app.patch('/api/notifications/:notificationId/read', verifyToken, async (req, res) => {
+  try {
+    const { notificationId } = req.params;
+    const result = await notificationsCollection.updateOne(
+      { _id: new ObjectId(notificationId) },
+      { $set: { isRead: true } }
+    );
+    res.send(result);
+  } catch (error) {
+    res.status(500).send({ error: "Failed to mark notification as read" });
   }
 });
 

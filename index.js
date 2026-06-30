@@ -57,6 +57,13 @@ const sellerVerify = (req, res, next) => {
   next();
 }
 
+const sellerOrAdminVerify = (req, res, next) => {
+  if (req.user.role !== 'seller' && req.user.role !== 'admin') {
+    return res.status(403).json({ message: "Forbidden" });
+  }
+  next();
+}
+
 const adminVerify = (req, res, next) => {
   if (req.user.role !== 'admin') {
     return res.status(403).json({ message: "Forbidden" });
@@ -190,7 +197,7 @@ app.post('/api/products', verifyToken, sellerVerify, async (req, res) => {
   res.send(result);
 })
 
-    app.delete('/api/products/:id', verifyToken, sellerVerify, async (req, res) => {
+    app.delete('/api/products/:id', verifyToken, sellerOrAdminVerify, async (req, res) => {
       try {
         const id = req.params.id;
         const query = { _id: new ObjectId(id) };
@@ -201,7 +208,7 @@ app.post('/api/products', verifyToken, sellerVerify, async (req, res) => {
       }
     });
 
-    app.patch('/api/products/:id', verifyToken, sellerVerify, async (req, res) => {
+    app.patch('/api/products/:id', verifyToken, sellerOrAdminVerify, async (req, res) => {
       try {
         const id = req.params.id;
         const updateData = req.body;

@@ -215,6 +215,20 @@ app.post('/api/products', verifyToken, sellerVerify, async (req, res) => {
         res.status(500).send({ message: err.message });
       }
     });
+
+    app.patch('/api/products/:id/report', verifyToken, async (req, res) => {
+      try {
+        const id = req.params.id;
+        const query = { _id: new ObjectId(id) };
+        const updateDoc = {
+          $set: { reported: true }
+        };
+        const result = await productsCollection.updateOne(query, updateDoc);
+        res.send(result);
+      } catch (err) {
+        res.status(500).send({ message: err.message });
+      }
+    });
 //wishlist
 app.post('/api/wishlist', verifyToken, async (req, res) => {
   const wishlist = req.body;

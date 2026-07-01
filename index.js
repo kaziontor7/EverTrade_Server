@@ -151,21 +151,53 @@ app.get('/users', async (req, res) => {
 })
 
     app.get('/api/products', async (req, res, next) => {
-      if (req.query.sellerId) {
+      // Optional seller verification
+      if (req.query.sellerId && req.headers.authorization) {
         return verifyToken(req, res, () => {
           return sellerVerify(req, res, next);
         });
       }
       next();
     }, async (req, res) => {
-      const query = {}
-      if (req.query.sellerId) {
-        query.sellerId = req.query.sellerId;
-      }
+      try {
+        const query = {};
+        
+        // Exact matches
+        if (req.query.sellerId) {
+          query.sellerId = req.query.sellerId;
+        }
+        if (req.query.category && req.query.category !== 'All') {
+          query.category = req.query.category;
+        }
 
-      const cursor = productsCollection.find(query)
-      const products = await cursor.toArray()
-      res.send(products)
+        // Search matches
+        if (req.query.search) {
+          query.title = { $regex: req.query.search, $options: 'i' };
+        }
+
+        // Sorting
+        let sort = { createdAt: -1 }; // newest by default
+        if (req.query.sort === 'price_asc') sort = { price: 1 };
+        if (req.query.sort === 'price_desc') sort = { price: -1 };
+
+        // Pagination
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 8;
+        const skip = (page - 1) * limit;
+
+        // Fetch data
+        const totalItems = await productsCollection.countDocuments(query);
+        const products = await productsCollection.find(query).sort(sort).skip(skip).limit(limit).toArray();
+
+        res.send({
+          products,
+          totalItems,
+          totalPages: Math.ceil(totalItems / limit) || 1,
+          currentPage: page
+        });
+      } catch (err) {
+        res.status(500).send({ message: "Failed to fetch products" });
+      }
     })
 app.get('/api/products/:id', async (req, res) => {
   try {

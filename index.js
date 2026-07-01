@@ -72,10 +72,6 @@ const adminVerify = (req, res, next) => {
 }
 
 
-// async function run() {
-//   try {
-//     // Connect the client to the server	(optional starting in v4.7)
-//     await client.connect();
 client.connect(() => {
   console.log("Successfully connected to MongoDB")
 }).catch(console.dir)
@@ -145,10 +141,7 @@ app.patch('/api/admin/users/:id/verify', verifyToken, adminVerify, async (req, r
   }
 });
 
-app.get('/users', async (req, res) => {
-  const users = await usersCollection.find({}).toArray()
-  res.send(users)
-})
+
 
     app.get('/api/products', async (req, res, next) => {
       // Optional seller verification
@@ -727,14 +720,7 @@ app.delete('/api/cart/clear/:userId', verifyToken, async (req, res) => {
 
 
 // Send a ping to confirm a successful connection
-// await database.command({ ping: 1 });
 console.log("Pinged your deployment. You successfully connected to MongoDB!");
-//   } finally {
-//     // Ensures that the client will close when you finish/error
-//     // await client.close();
-//   }
-// }
-// run().catch(console.dir);
 
 
 
